@@ -18,3 +18,8 @@ set_global_assignment -name VERILOG_FILE rtl/mouse.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/keyboard.sv
 set_global_assignment -name SDC_FILE "ZX-Spectrum.sdc"
 set_global_assignment -name SYSTEMVERILOG_FILE "ZX-Spectrum.sv"
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_ui.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestates_szx.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestates_z80.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestates_sna.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestates_dispatch.sv

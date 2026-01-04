@@ -44,80 +44,102 @@ module ddram
 	input   [7:0] din,         // data input from cpu
 	input         we,          // cpu requests write
 	input         rd,          // cpu requests read
-	output        ready        // dout is valid. Ready to accept new read/write.
+	output        ready,       // dout is valid. Ready to accept new read/write.
+
+	// ch1 - 64-bit interface for SaveStates
+	input  [27:1] ch1_addr,
+	output [63:0] ch1_dout,
+	input  [63:0] ch1_din,
+	input         ch1_req,
+	input         ch1_rnw,
+	input   [7:0] ch1_be,
+	output        ch1_ready
 );
 
 assign DDRAM_BURSTCNT = 1;
-assign DDRAM_BE       = (8'd1<<ram_address[2:0]) | {8{ram_read}};
-assign DDRAM_ADDR     = {4'b0011, ram_address[27:3]}; // RAM at 0x30000000
-assign DDRAM_RD       = ram_read;
-assign DDRAM_DIN      = ram_cache;
-assign DDRAM_WE       = ram_write;
 
-assign dout = ram_q;
-assign ready = ~busy;
-
-reg  [7:0] ram_q;
+reg [63:0] ram_q[2];
+reg [63:0] ram_data;
 reg [27:0] ram_address;
-reg        ram_read;
-reg [63:0] ram_cache;
-reg        ram_write;
-reg  [7:0] cached;
-reg        busy;
+reg        ram_read = 0;
+reg        ram_write = 0;
+reg  [7:0] ram_be;
+reg  [1:0] ch_ready;
 
+assign DDRAM_BE   = ram_read ? 8'hFF : ram_be;
+assign DDRAM_ADDR = {4'b0011, ram_address[27:3]}; // Base 0x30000000
+assign DDRAM_RD   = ram_read;
+assign DDRAM_DIN  = ram_data;
+assign DDRAM_WE   = ram_write;
 
-always @(posedge DDRAM_CLK)
-begin
+assign dout      = ram_q[0][(addr[2:0]*8) +: 8];
+assign ready     = ch_ready[0];
+
+assign ch1_dout  = ram_q[1];
+assign ch1_ready = ch_ready[1];
+
+reg       state = 0;
+reg       ch = 0;
+reg [1:0] ch_rq;
+
+always @(posedge DDRAM_CLK) begin
 	reg old_rd, old_we;
-	reg old_reset;
-	reg state;
+	
+	ch_rq[1] <= ch_rq[1] | ch1_req;
+	
+	old_rd <= rd;
+	old_we <= we;
+	if (~old_rd && rd) ch_rq[0] <= 1;
+	if (~old_we && we) ch_rq[0] <= 1;
 
-	old_reset <= reset;
-	if(old_reset && ~reset) begin
-		busy   <= 0;
-		state  <= 0;
-		cached <= 0;
-	end
+	ch_ready <= 0;
 
-	if(!DDRAM_BUSY)
-	begin
+	if (!DDRAM_BUSY) begin
 		ram_write <= 0;
 		ram_read  <= 0;
-		if(state) begin
-			if(DDRAM_DOUT_READY) begin
-				ram_q     <= DDRAM_DOUT[{ram_address[2:0], 3'b000} +:8];
-				ram_cache <= DDRAM_DOUT;
-				cached    <= 8'hFF;
-				state     <= 0;
-				busy      <= 0;
-			end
-		end
-		else begin
-			old_rd <= rd;
-			old_we <= we;
-			busy   <= 0;
 
-			if(~old_we && we) begin
-				ram_cache[{addr[2:0], 3'b000} +:8] <= din;
-				ram_address <= addr;
-				busy        <= 1;
-				ram_write 	<= 1;
-				cached      <= ((ram_address[27:3] == addr[27:3]) ? cached : 8'h00) | (8'd1<<addr[2:0]);
-			end
-
-			if(~old_rd && rd) begin
-				if((ram_address[27:3] == addr[27:3]) && (cached & (8'd1<<addr[2:0]))) begin
-					ram_q <= ram_cache[{addr[2:0], 3'b000} +:8];
+		case(state)
+			0: begin
+				if (ch_rq[1] || ch1_req) begin
+					ch_rq[1]    <= 0;
+					ch          <= 1;
+					ram_data    <= ch1_din;
+					ram_be      <= ch1_be;
+					ram_address <= {ch1_addr, 1'b0};
+					
+					if (!ch1_rnw) begin
+						ram_write   <= 1;
+						ch_ready[1] <= 1;
+					end else begin
+						ram_read    <= 1;
+						state       <= 1;
+					end
 				end
-				else begin
+				else if (ch_rq[0]) begin
+					ch_rq[0]    <= 0;
+					ch          <= 0;
 					ram_address <= addr;
-					ram_read    <= 1;
-					state       <= 1;
-					cached      <= 0;
-					busy        <= 1;
+					
+					if (we) begin
+						ram_data    <= {8{din}};
+						ram_be      <= (1'b1 << addr[2:0]);
+						ram_write   <= 1;
+						ch_ready[0] <= 1;
+					end else begin
+						ram_read    <= 1;
+						state       <= 1;
+					end
 				end
 			end
-		end
+
+			1: begin
+				if (DDRAM_DOUT_READY) begin
+					ram_q[ch] <= DDRAM_DOUT;
+					ch_ready[ch] <= 1;
+					state <= 0;
+				end
+			end
+		endcase
 	end
 end
 
